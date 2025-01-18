@@ -3,12 +3,18 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 const http = require("http");
 const socketIo = require("socket.io");
-const cookieParser = require("cookie-parser");  // Added this import
+const cookieParser = require("cookie-parser");
 const jwt = require("jsonwebtoken");
-const UserModel = require("./models/User");  // Make sure this path is correct
-const app = express();
+const path = require("path");
+const multer = require("multer");
 
-// Create HTTP server
+// Import all models
+const UserModel = require("./models/User");
+const MenuItem = require("./models/Menu");
+const Order = require("./models/Order");
+const ClientOrder = require("./models/ClientOrder");
+
+const app = express();
 const server = http.createServer(app);
 
 // Define allowed origins
@@ -17,7 +23,7 @@ const allowedOrigins = [
   'http://localhost:5173'
 ];
 
-// Setup Socket.IO with CORS
+// Setup Socket.IO
 const io = socketIo(server, {
   cors: {
     origin: allowedOrigins,
@@ -26,21 +32,19 @@ const io = socketIo(server, {
   }
 });
 
-// Socket.IO connection handling
-io.on("connection", (socket) => {
-  console.log("New client connected");
-
-  socket.on("authenticate", (userId) => {
-    socket.userId = userId;
-    console.log(`User ${userId} authenticated`);
-  });
-
-  socket.on("disconnect", () => {
-    console.log("Client disconnected");
-  });
+// Multer setup for image storage
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, "public/Images");
+  },
+  filename: function (req, file, cb) {
+    cb(null, Date.now() + path.extname(file.originalname));
+  },
 });
 
-// CORS configuration
+const upload = multer({ storage: storage });
+
+// CORS and middleware setup
 app.use(cors({
   origin: function(origin, callback) {
     if (!origin || allowedOrigins.indexOf(origin) !== -1) {
@@ -56,19 +60,84 @@ app.use(cors({
 
 app.use(express.json());
 app.use(cookieParser());
+app.use("/Images", express.static(path.join(__dirname, "public/Images")));
 
-// Add security headers middleware
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Credentials', 'true');
-  res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS');
-  res.header(
-    'Access-Control-Allow-Headers',
-    'Origin, X-Requested-With, Content-Type, Accept, Authorization'
-  );
-  next();
+// Menu Routes
+app.get("/menu", async (req, res) => {
+  try {
+    const items = await MenuItem.find();
+    res.json(items);
+  } catch (err) {
+    console.error("Error fetching menu items:", err);
+    res.status(500).json({ message: "Error fetching menu items" });
+  }
 });
 
-// Login route
+app.post("/menu", upload.single("image"), async (req, res) => {
+  try {
+    const item = new MenuItem({
+      ...req.body,
+      image: req.file ? `/Images/${req.file.filename}` : null,
+    });
+    const savedItem = await item.save();
+    res.json(savedItem);
+  } catch (err) {
+    res.status(400).json(err);
+  }
+});
+
+// Orders Routes
+app.get("/orders", async (req, res) => {
+  try {
+    const userId = req.query.userId;
+    let orders;
+    if (userId === "668e8d77cfc185e3ac2d32a5") {
+      orders = await Order.find({});
+    } else {
+      orders = await Order.find({ userId: userId });
+    }
+    res.json(orders);
+  } catch (error) {
+    console.error("Error fetching orders:", error);
+    res.status(500).json({ message: "Failed to fetch orders" });
+  }
+});
+
+app.post("/orders", async (req, res) => {
+  try {
+    const newOrder = new Order(req.body);
+    const savedOrder = await newOrder.save();
+    io.emit("newOrder", savedOrder);
+    res.status(201).json(savedOrder);
+  } catch (error) {
+    console.error("Error creating order:", error);
+    res.status(500).json({ message: "Failed to create order" });
+  }
+});
+
+// Client Orders Routes
+app.get("/clientorders", async (req, res) => {
+  try {
+    const orders = await ClientOrder.find();
+    res.json(orders);
+  } catch (error) {
+    console.error("Error fetching client orders:", error);
+    res.status(500).json({ message: "Failed to fetch client orders" });
+  }
+});
+
+app.post("/clientorders", async (req, res) => {
+  try {
+    const newOrder = new ClientOrder(req.body);
+    const savedOrder = await newOrder.save();
+    res.status(201).json(savedOrder);
+  } catch (error) {
+    console.error("Error creating client order:", error);
+    res.status(500).json({ message: "Failed to create client order" });
+  }
+});
+
+// Login route (kept from previous version)
 app.post("/Login", (req, res) => {
   const { email, password } = req.body;
   UserModel.findOne({ email: email })
@@ -136,5 +205,4 @@ server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
 
-// Export for potential testing or external use
 module.exports = { app, server, io };
