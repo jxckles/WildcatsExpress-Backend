@@ -41,6 +41,8 @@ io.on("connection", (socket) => {
   });
 });
 
+
+app.use(cors());
 app.use(express.json());
 app.use(cookieParser());
 app.use(
@@ -61,6 +63,13 @@ app.use("/Images", express.static(path.join(__dirname, "public/Images")));
 mongoose.connect(
   "mongodb+srv://castroy092003:7xiHqTSiUKH0ZIf4@wildcats-food-express.7w2snhk.mongodb.net/User?retryWrites=true&w=majority&appName=Wildcats-Food-Express"
 );
+
+
+app.get("/", (req, res) => {
+  res.setHeader("Access-Control-Allow-Credentials", "true);
+  res.send("API is running...");
+});
+
 
 // Multer configuration for receipt upload
 const receiptStorage = multer.diskStorage({
@@ -181,7 +190,7 @@ const renewToken = (req, res) => {
   }
 };
 
-app.get("/admin", verifyUser, (req, res) => {
+("/admin", verifyUser, (req, res) => {
   if (req.role !== "Admin") {
     return res
       .status(403)
