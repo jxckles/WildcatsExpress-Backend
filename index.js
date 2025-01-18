@@ -3,6 +3,9 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 const http = require("http");
 const socketIo = require("socket.io");
+const cookieParser = require("cookie-parser");  // Added this import
+const jwt = require("jsonwebtoken");
+const UserModel = require("./models/User");  // Make sure this path is correct
 const app = express();
 
 // Create HTTP server
@@ -121,7 +124,11 @@ app.post("/Login", (req, res) => {
 // MongoDB connection
 mongoose.connect(
   "mongodb+srv://castroy092003:7xiHqTSiUKH0ZIf4@wildcats-food-express.7w2snhk.mongodb.net/User?retryWrites=true&w=majority&appName=Wildcats-Food-Express"
-);
+).then(() => {
+  console.log("Connected to MongoDB");
+}).catch((err) => {
+  console.error("MongoDB connection error:", err);
+});
 
 // Start server
 const PORT = process.env.PORT || 5000;
