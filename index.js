@@ -1,32 +1,58 @@
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
+const http = require("http");
+const socketIo = require("socket.io");
 const app = express();
 
-// Other imports remain the same...
+// Create HTTP server
+const server = http.createServer(app);
 
 // Define allowed origins
 const allowedOrigins = [
   'https://wildcatsexpress.onrender.com',
-  'http://localhost:5173' // Keep local development origin
+  'http://localhost:5173'
 ];
+
+// Setup Socket.IO with CORS
+const io = socketIo(server, {
+  cors: {
+    origin: allowedOrigins,
+    methods: ["GET", "POST"],
+    credentials: true
+  }
+});
+
+// Socket.IO connection handling
+io.on("connection", (socket) => {
+  console.log("New client connected");
+
+  socket.on("authenticate", (userId) => {
+    socket.userId = userId;
+    console.log(`User ${userId} authenticated`);
+  });
+
+  socket.on("disconnect", () => {
+    console.log("Client disconnected");
+  });
+});
 
 // CORS configuration
 app.use(cors({
   origin: function(origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
-    
-    if (allowedOrigins.indexOf(origin) === -1) {
-      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
-      return callback(new Error(msg), false);
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
     }
-    return callback(null, true);
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   credentials: true,
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept']
 }));
+
+app.use(express.json());
+app.use(cookieParser());
 
 // Add security headers middleware
 app.use((req, res, next) => {
@@ -39,7 +65,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// Modified Login route with proper CORS handling
+// Login route
 app.post("/Login", (req, res) => {
   const { email, password } = req.body;
   UserModel.findOne({ email: email })
@@ -62,13 +88,12 @@ app.post("/Login", (req, res) => {
             { expiresIn: "7d" }
           );
 
-          // Set cookies with proper configuration
           res.cookie("accessToken", accessToken, {
             maxAge: 15 * 60 * 1000,
             httpOnly: true,
-            secure: true, // Enable for HTTPS
-            sameSite: 'none', // Required for cross-origin cookies
-            domain: '.onrender.com' // Adjust domain as needed
+            secure: true,
+            sameSite: 'none',
+            domain: '.onrender.com'
           });
 
           res.cookie("refreshToken", refreshToken, {
@@ -93,8 +118,16 @@ app.post("/Login", (req, res) => {
     });
 });
 
+// MongoDB connection
+mongoose.connect(
+  "mongodb+srv://castroy092003:7xiHqTSiUKH0ZIf4@wildcats-food-express.7w2snhk.mongodb.net/User?retryWrites=true&w=majority&appName=Wildcats-Food-Express"
+);
+
 // Start server
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
+
+// Export for potential testing or external use
+module.exports = { app, server, io };
