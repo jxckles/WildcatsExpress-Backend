@@ -62,82 +62,32 @@ app.use(express.json());
 app.use(cookieParser());
 app.use("/Images", express.static(path.join(__dirname, "public/Images")));
 
-// Menu Routes
-app.get("/menu", async (req, res) => {
+// Authentication Middleware
+const verifyToken = (req, res, next) => {
+  const accessToken = req.cookies.accessToken;
+  
+  if (!accessToken) {
+    return res.status(401).json({ message: "No token provided" });
+  }
+
   try {
-    const items = await MenuItem.find();
-    res.json(items);
+    const decoded = jwt.verify(accessToken, "jwt-access-token-secret-key");
+    req.user = decoded;
+    next();
   } catch (err) {
-    console.error("Error fetching menu items:", err);
-    res.status(500).json({ message: "Error fetching menu items" });
+    return res.status(401).json({ message: "Invalid or expired token" });
   }
-});
+};
 
-app.post("/menu", upload.single("image"), async (req, res) => {
-  try {
-    const item = new MenuItem({
-      ...req.body,
-      image: req.file ? `/Images/${req.file.filename}` : null,
-    });
-    const savedItem = await item.save();
-    res.json(savedItem);
-  } catch (err) {
-    res.status(400).json(err);
+// Admin Middleware
+const isAdmin = (req, res, next) => {
+  if (req.user.role !== "admin") {
+    return res.status(403).json({ message: "Access denied: Admin only" });
   }
-});
+  next();
+};
 
-// Orders Routes
-app.get("/orders", async (req, res) => {
-  try {
-    const userId = req.query.userId;
-    let orders;
-    if (userId === "668e8d77cfc185e3ac2d32a5") {
-      orders = await Order.find({});
-    } else {
-      orders = await Order.find({ userId: userId });
-    }
-    res.json(orders);
-  } catch (error) {
-    console.error("Error fetching orders:", error);
-    res.status(500).json({ message: "Failed to fetch orders" });
-  }
-});
-
-app.post("/orders", async (req, res) => {
-  try {
-    const newOrder = new Order(req.body);
-    const savedOrder = await newOrder.save();
-    io.emit("newOrder", savedOrder);
-    res.status(201).json(savedOrder);
-  } catch (error) {
-    console.error("Error creating order:", error);
-    res.status(500).json({ message: "Failed to create order" });
-  }
-});
-
-// Client Orders Routes
-app.get("/clientorders", async (req, res) => {
-  try {
-    const orders = await ClientOrder.find();
-    res.json(orders);
-  } catch (error) {
-    console.error("Error fetching client orders:", error);
-    res.status(500).json({ message: "Failed to fetch client orders" });
-  }
-});
-
-app.post("/clientorders", async (req, res) => {
-  try {
-    const newOrder = new ClientOrder(req.body);
-    const savedOrder = await newOrder.save();
-    res.status(201).json(savedOrder);
-  } catch (error) {
-    console.error("Error creating client order:", error);
-    res.status(500).json({ message: "Failed to create client order" });
-  }
-});
-
-// Login route (kept from previous version)
+// Auth Routes
 app.post("/Login", (req, res) => {
   const { email, password } = req.body;
   UserModel.findOne({ email: email })
@@ -149,19 +99,19 @@ app.post("/Login", (req, res) => {
           const userName = user.firstName + " " + user.lastName;
           
           const accessToken = jwt.sign(
-            { email: email, role: role },
+            { email: email, role: role, userId: userID },
             "jwt-access-token-secret-key",
-            { expiresIn: "7d" }
+            { expiresIn: "1d" }
           );
           
           const refreshToken = jwt.sign(
-            { email: email, role: role },
+            { email: email, role: role, userId: userID },
             "jwt-refresh-access-token-secret-key",
             { expiresIn: "7d" }
           );
 
           res.cookie("accessToken", accessToken, {
-            maxAge: 15 * 60 * 1000,
+            maxAge: 24 * 60 * 60 * 1000, // 1 day
             httpOnly: true,
             secure: true,
             sameSite: 'none',
@@ -169,7 +119,7 @@ app.post("/Login", (req, res) => {
           });
 
           res.cookie("refreshToken", refreshToken, {
-            maxAge: 2 * 24 * 60 * 60 * 1000,
+            maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
             httpOnly: true,
             secure: true,
             sameSite: 'none',
@@ -188,6 +138,184 @@ app.post("/Login", (req, res) => {
       console.error('Login error:', err);
       return res.status(500).json({ message: "Server error" });
     });
+});
+
+app.post("/logout", (req, res) => {
+  res.clearCookie("accessToken", {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'none',
+    domain: '.onrender.com'
+  });
+  res.clearCookie("refreshToken", {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'none',
+    domain: '.onrender.com'
+  });
+  res.json({ message: "Logged out successfully" });
+});
+
+app.get("/check-auth", verifyToken, (req, res) => {
+  res.json({ 
+    authenticated: true, 
+    user: req.user 
+  });
+});
+
+// Admin Routes
+app.get("/admin", verifyToken, isAdmin, (req, res) => {
+  res.json({ message: "Admin access granted", user: req.user });
+});
+
+app.get("/admin/users", verifyToken, isAdmin, async (req, res) => {
+  try {
+    const users = await UserModel.find({}, '-password');
+    res.json(users);
+  } catch (error) {
+    res.status(500).json({ message: "Error fetching users" });
+  }
+});
+
+app.get("/admin/orders", verifyToken, isAdmin, async (req, res) => {
+  try {
+    const orders = await Order.find({}).populate('userId');
+    res.json(orders);
+  } catch (error) {
+    res.status(500).json({ message: "Error fetching orders" });
+  }
+});
+
+// Menu Routes
+app.get("/menu", async (req, res) => {
+  try {
+    const items = await MenuItem.find();
+    res.json(items);
+  } catch (err) {
+    console.error("Error fetching menu items:", err);
+    res.status(500).json({ message: "Error fetching menu items" });
+  }
+});
+
+app.post("/menu", verifyToken, isAdmin, upload.single("image"), async (req, res) => {
+  try {
+    const item = new MenuItem({
+      ...req.body,
+      image: req.file ? `/Images/${req.file.filename}` : null,
+    });
+    const savedItem = await item.save();
+    res.json(savedItem);
+  } catch (err) {
+    res.status(400).json(err);
+  }
+});
+
+app.put("/menu/:id", verifyToken, isAdmin, upload.single("image"), async (req, res) => {
+  try {
+    const updatedItem = await MenuItem.findByIdAndUpdate(
+      req.params.id,
+      {
+        ...req.body,
+        ...(req.file && { image: `/Images/${req.file.filename}` }),
+      },
+      { new: true }
+    );
+    res.json(updatedItem);
+  } catch (err) {
+    res.status(400).json(err);
+  }
+});
+
+app.delete("/menu/:id", verifyToken, isAdmin, async (req, res) => {
+  try {
+    await MenuItem.findByIdAndDelete(req.params.id);
+    res.json({ message: "Item deleted successfully" });
+  } catch (err) {
+    res.status(400).json(err);
+  }
+});
+
+// Orders Routes
+app.get("/orders", verifyToken, async (req, res) => {
+  try {
+    const userId = req.query.userId;
+    let orders;
+    if (req.user.role === "admin") {
+      orders = await Order.find({});
+    } else {
+      orders = await Order.find({ userId: userId });
+    }
+    res.json(orders);
+  } catch (error) {
+    console.error("Error fetching orders:", error);
+    res.status(500).json({ message: "Failed to fetch orders" });
+  }
+});
+
+app.post("/orders", verifyToken, async (req, res) => {
+  try {
+    const newOrder = new Order({
+      ...req.body,
+      userId: req.user.userId
+    });
+    const savedOrder = await newOrder.save();
+    io.emit("newOrder", savedOrder);
+    res.status(201).json(savedOrder);
+  } catch (error) {
+    console.error("Error creating order:", error);
+    res.status(500).json({ message: "Failed to create order" });
+  }
+});
+
+app.put("/orders/:id", verifyToken, async (req, res) => {
+  try {
+    const updatedOrder = await Order.findByIdAndUpdate(
+      req.params.id,
+      req.body,
+      { new: true }
+    );
+    io.emit("orderUpdated", updatedOrder);
+    res.json(updatedOrder);
+  } catch (error) {
+    res.status(400).json({ message: "Error updating order" });
+  }
+});
+
+// Client Orders Routes
+app.get("/clientorders", verifyToken, async (req, res) => {
+  try {
+    const orders = await ClientOrder.find();
+    res.json(orders);
+  } catch (error) {
+    console.error("Error fetching client orders:", error);
+    res.status(500).json({ message: "Failed to fetch client orders" });
+  }
+});
+
+app.post("/clientorders", verifyToken, async (req, res) => {
+  try {
+    const newOrder = new ClientOrder({
+      ...req.body,
+      userId: req.user.userId
+    });
+    const savedOrder = await newOrder.save();
+    io.emit("newClientOrder", savedOrder);
+    res.status(201).json(savedOrder);
+  } catch (error) {
+    console.error("Error creating client order:", error);
+    res.status(500).json({ message: "Failed to create client order" });
+  }
+});
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({ message: "Something went wrong!" });
+});
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({ message: "Route not found" });
 });
 
 // MongoDB connection
